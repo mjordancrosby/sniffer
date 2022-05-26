@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+#include "sniffer.h"
+
 static volatile  bool running = true;
 
 void init_handler(int)
@@ -25,11 +27,16 @@ int main(int argc, char **argv)
     act.sa_handler = init_handler;
     sigaction(SIGINT, &act, NULL);
 
+    sniffer_t sniffer;
+    sniffer_init(&sniffer, argv[1]);
+
     while (running)
     {
         printf("Running\n");
         sleep(1);
     }
-
-    printf("Finished\n");
+    
+    printf("Cleaning up\n");
+    sniffer_cleanup(&sniffer);
+    printf("Shutting down\n");
 }
