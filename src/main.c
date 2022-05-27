@@ -29,7 +29,7 @@ int main(int argc, char **argv)
     sigaction(SIGINT, &act, NULL);
 
     sniffer_t sniffer;
-    sniffer_init(&sniffer, argv[1]);
+    sniffer_init(&sniffer, argv[1], false);
     
     struct timeval next;
     gettimeofday(&next, NULL);

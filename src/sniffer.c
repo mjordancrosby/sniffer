@@ -3,12 +3,14 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <linux/if_packet.h>
+#include <linux/if.h>
 #include <linux/tcp.h>
 #include <linux/udp.h>
 #include <search.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <net/ethernet.h>
 #include <netinet/in.h>
@@ -20,7 +22,7 @@ typedef struct node {
     struct node *next;
 } node_t;
 
-int sniffer_init(sniffer_t *sniffer, char *interface)
+int sniffer_init(sniffer_t *sniffer, char *interface, bool promiscuous_mode)
 {
     sniffer->sockfd = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_IP));
 
@@ -30,7 +32,6 @@ int sniffer_init(sniffer_t *sniffer, char *interface)
         return -1;
     }
 
-
     if (setsockopt(sniffer->sockfd, SOL_SOCKET, SO_BINDTODEVICE, interface, strlen(interface)) == -1)
     {
         fprintf(stderr, "Failed to bind to interface %s - %s\n", interface, strerror(errno));
@@ -38,6 +39,25 @@ int sniffer_init(sniffer_t *sniffer, char *interface)
         return -1;
     }
 
+    if (promiscuous_mode)
+    {
+        struct ifreq ifreq;
+        strcpy (ifreq.ifr_name, interface);
+        if (ioctl(sniffer->sockfd, SIOCGIFFLAGS, &ifreq) == -1)
+        {
+            fprintf(stderr, "Failed to get IF flags %s - %s\n", interface, strerror(errno));
+            close(sniffer->sockfd);
+            return -1;
+        }
+        
+        ifreq.ifr_flags |= IFF_PROMISC;
+        if (ioctl(sniffer->sockfd, SIOCSIFFLAGS, &ifreq) == -1)
+        {
+            fprintf(stderr, "Failed to set permisoucs mode %s - %s\n", interface, strerror(errno));
+            close(sniffer->sockfd);
+            return -1;
+        }
+    }
     sniffer->epollfd = epoll_create1(0);
 
     if (sniffer->epollfd == -1)
