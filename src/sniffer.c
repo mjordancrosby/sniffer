@@ -17,6 +17,9 @@
 #include <netinet/ip.h>
 #include <unistd.h>
 
+#define IP_MF 0x2000 
+#define IP_OFFSET 0x1FFF
+
 typedef struct node {
     ENTRY* value;
     struct node *next;
@@ -126,6 +129,13 @@ int sniffer_poll(sniffer_t *sniffer, int timeout)
             fprintf(stderr, "Did not receive a complete ipv4 header\n");
             return -1;
         }
+
+        //ignore remaing ip fragments 
+        if ((iphdr->frag_off & IP_MF) == IP_MF && (iphdr->frag_off & IP_OFFSET) != 0x0000)
+        {
+            return 0;
+        }
+ 
         struct sockaddr_in src, dest;
         
         src.sin_addr.s_addr = iphdr->saddr;
