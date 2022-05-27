@@ -1,15 +1,19 @@
 #include "sniffer.h"
 
+#include <arpa/inet.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <linux/if_packet.h>
+#include <linux/tcp.h>
+#include <linux/udp.h>
 #include <sys/socket.h>
 #include <net/ethernet.h>
+#include <netinet/in.h>
 #include <netinet/ip.h>
 #include <errno.h>
 #include <string.h>
 #include <unistd.h>
 
-#define MAX_PCKT_LENGTH 65507 
 
 int sniffer_init(sniffer_t *sniffer, char *interface)
 {
@@ -49,6 +53,59 @@ int sniffer_init(sniffer_t *sniffer, char *interface)
         return -1;
     }
 
+    return 0;
+}
+
+int sniffer_poll(sniffer_t *sniffer, int timeout)
+{
+    struct epoll_event event;
+    
+    int n;
+    if ((n = epoll_wait(sniffer->epollfd, &event, 1, timeout)) == -1)
+    {
+        return -1;
+    }
+    
+    if (n > 0 && event.data.fd == sniffer->sockfd)
+    {
+        //only need to read the header
+        char buffer[2048];
+        struct iphdr *iphdr = (struct iphdr *) (buffer + sizeof(struct ethhdr));
+
+        struct sockaddr_ll src_saddr;
+        socklen_t src_saddr_len = sizeof(src_saddr);
+        ssize_t recv = recvfrom(event.data.fd, &buffer, 2048, 0, (struct sockaddr *)&src_saddr, &src_saddr_len);
+
+        if (recv == -1)
+        {
+            return -1;
+        } 
+
+        struct sockaddr_in src, dest;
+        
+        src.sin_addr.s_addr = iphdr->saddr;
+        char src_ip[13];
+        strcpy(src_ip, inet_ntoa(src.sin_addr));
+
+        dest.sin_addr.s_addr = iphdr->daddr;
+        char dest_ip[13];
+        strcpy(dest_ip, inet_ntoa(dest.sin_addr));
+
+        if (iphdr->protocol == IPPROTO_TCP)
+        {
+            struct tcphdr *tcphdr = (struct tcphdr *) (buffer + sizeof(struct ethhdr) + sizeof(struct iphdr));
+            printf("%s:%u => %s:%u %d\n", src_ip, ntohs(tcphdr->source), dest_ip, ntohs(tcphdr->dest), (unsigned int)iphdr->protocol);
+        }
+        else if (iphdr->protocol == IPPROTO_UDP)
+        {
+            struct udphdr *udphdr = (struct udphdr *) (buffer + sizeof(struct ethhdr) + sizeof(struct iphdr));
+            printf("%s:%d => %s:%d %d\n", src_ip, ntohs(udphdr->source), dest_ip, ntohs(udphdr->dest), (unsigned int)iphdr->protocol);
+        }
+        else
+        {
+            printf("%s => %s %d\n", src_ip, dest_ip, (unsigned int)iphdr->protocol);
+        }
+    }
     return 0;
 }
 

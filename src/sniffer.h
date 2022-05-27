@@ -8,3 +8,4 @@ typedef struct sniffer {
 
 int sniffer_init(sniffer_t *sniffer, char* interface);
 int sniffer_cleanup(sniffer_t *sniffer);
+int sniffer_poll(sniffer_t *sniffer, int timeout);

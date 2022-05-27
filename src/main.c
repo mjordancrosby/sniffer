@@ -32,11 +32,8 @@ int main(int argc, char **argv)
 
     while (running)
     {
-        printf("Running\n");
-        sleep(1);
+        sniffer_poll(&sniffer, 10);
     }
     
-    printf("Cleaning up\n");
     sniffer_cleanup(&sniffer);
-    printf("Shutting down\n");
 }
