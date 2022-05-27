@@ -29,7 +29,10 @@ int main(int argc, char **argv)
     sigaction(SIGINT, &act, NULL);
 
     sniffer_t sniffer;
-    sniffer_init(&sniffer, argv[1], false);
+    if (sniffer_init(&sniffer, argv[1], false) == -1)
+    {
+        exit(1);
+    }
     
     struct timeval next;
     gettimeofday(&next, NULL);
@@ -56,7 +59,10 @@ int main(int argc, char **argv)
             delta = 10000;
         }
 
-        sniffer_poll(&sniffer, (int) delta/1000);
+        if (sniffer_poll(&sniffer, (int) delta/1000) == -1)
+        {
+            exit(1);
+        }
     }
     
     sniffer_cleanup(&sniffer);

@@ -113,9 +113,19 @@ int sniffer_poll(sniffer_t *sniffer, int timeout)
 
         if (recv == -1)
         {
-            return -1;
+            if (errno != EINTR)
+            {
+                fprintf(stderr, "epoll_wait failed - %s\n", strerror(errno));
+                return -1;
+            }
+            return 0;
         } 
 
+        if (recv < 38)
+        {
+            fprintf(stderr, "Did not receive a complete ipv4 header\n");
+            return -1;
+        }
         struct sockaddr_in src, dest;
         
         src.sin_addr.s_addr = iphdr->saddr;
