@@ -1,19 +1,24 @@
 #include "sniffer.h"
 
 #include <arpa/inet.h>
-#include <stdio.h>
-#include <stdlib.h>
+#include <errno.h>
 #include <linux/if_packet.h>
 #include <linux/tcp.h>
 #include <linux/udp.h>
+#include <search.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/socket.h>
 #include <net/ethernet.h>
 #include <netinet/in.h>
 #include <netinet/ip.h>
-#include <errno.h>
-#include <string.h>
 #include <unistd.h>
 
+typedef struct node {
+    ENTRY* value;
+    struct node *next;
+} node_t;
 
 int sniffer_init(sniffer_t *sniffer, char *interface)
 {
@@ -53,6 +58,16 @@ int sniffer_init(sniffer_t *sniffer, char *interface)
         return -1;
     }
 
+    if (hcreate(20000) == 0)
+    {
+    
+        fprintf(stderr, "Find to create hashtable - %s\n", strerror(errno));
+        close(sniffer->sockfd);
+        close(sniffer->epollfd);
+        return -1;
+    }
+
+    sniffer->flows = NULL;
     return 0;
 }
 
@@ -91,26 +106,89 @@ int sniffer_poll(sniffer_t *sniffer, int timeout)
         char dest_ip[13];
         strcpy(dest_ip, inet_ntoa(dest.sin_addr));
 
+        char flow[64];
         if (iphdr->protocol == IPPROTO_TCP)
         {
             struct tcphdr *tcphdr = (struct tcphdr *) (buffer + sizeof(struct ethhdr) + sizeof(struct iphdr));
-            printf("%s:%u => %s:%u %d\n", src_ip, ntohs(tcphdr->source), dest_ip, ntohs(tcphdr->dest), (unsigned int)iphdr->protocol);
+            sprintf(flow, "%s:%u => %s:%u %d", src_ip, ntohs(tcphdr->source), dest_ip, ntohs(tcphdr->dest), (unsigned int)iphdr->protocol);
         }
         else if (iphdr->protocol == IPPROTO_UDP)
         {
             struct udphdr *udphdr = (struct udphdr *) (buffer + sizeof(struct ethhdr) + sizeof(struct iphdr));
-            printf("%s:%d => %s:%d %d\n", src_ip, ntohs(udphdr->source), dest_ip, ntohs(udphdr->dest), (unsigned int)iphdr->protocol);
+            sprintf(flow, "%s:%d => %s:%d %d", src_ip, ntohs(udphdr->source), dest_ip, ntohs(udphdr->dest), (unsigned int)iphdr->protocol);
         }
         else
         {
-            printf("%s => %s %d\n", src_ip, dest_ip, (unsigned int)iphdr->protocol);
+            sprintf(flow, "%s => %s %d", src_ip, dest_ip, (unsigned int)iphdr->protocol);
         }
+
+        ENTRY item;
+        ENTRY *existing;
+        item.key = flow;
+
+        existing = hsearch(item, FIND);
+        if (existing)
+        {
+            unsigned int *i = (unsigned int *)existing->data;
+            *i += 1;
+        }
+        else
+        {
+            char* key = calloc(strlen(flow) + 1, sizeof(char));
+            strcpy(key, flow);
+            unsigned int *i = malloc(sizeof(unsigned int));
+            *i = 1;
+            
+            ENTRY new_item;
+            new_item.data = i;
+            new_item.key = key;
+
+            ENTRY *result;
+            result = hsearch(new_item, ENTER);
+            if (!result)
+            {
+                fprintf(stderr, "Flow store full");
+                return -1;
+            }
+            
+            node_t *next = malloc(sizeof(node_t));
+
+            next->value = result;
+            next->next = (node_t *)sniffer->flows;
+
+            sniffer->flows = next;
+        }
+    
     }
     return 0;
 }
 
+void sniffer_print(sniffer_t *sniffer)
+{
+    node_t *node;
+    for(node = (node_t *)sniffer->flows; node != NULL; node = node->next)
+    {
+        unsigned int *count = (unsigned int *)node->value->data;
+        printf("%s = %u\n", node->value->key, *count);
+    }
+}
+
 int sniffer_cleanup(sniffer_t *sniffer)
 {
+
+    node_t *node;
+    node = (node_t *)sniffer->flows;
+    while(node)
+    {
+        free(node->value->data);
+        free(node->value->key);
+        node_t *to_be_freed = node;
+        node = node->next;
+        free(to_be_freed);
+    }
+
+    hdestroy();
+
     if (epoll_ctl(sniffer->epollfd, EPOLL_CTL_DEL, sniffer->sockfd, &sniffer->event) < 0)
     {
         fprintf(stderr, "Find to deregister epoll events - %s\n", strerror(errno));
