@@ -357,7 +357,7 @@ int sniffer_cleanup(sniffer_t *sniffer)
     return 0;
 }
 
-void sniffer_stop(sniffer_t *sniffer)
+int sniffer_stop(sniffer_t *sniffer)
 {
     struct itimerspec ts;
     ts.it_interval.tv_sec = 0;
@@ -368,7 +368,9 @@ void sniffer_stop(sniffer_t *sniffer)
     if (timerfd_settime(sniffer->timerfd, 0, &ts, NULL) == -1)
     {
         fprintf(stderr, "Failed to disable timer - %s\n", strerror(errno));
+        return -1;
     }
 
     sniffer->running = false;
+    return 0;
 }

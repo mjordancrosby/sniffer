@@ -10,7 +10,10 @@ sniffer_t sniffer;
 
 void init_handler(int)
 {
-    sniffer_stop(&sniffer);
+    if (sniffer_stop(&sniffer) == -1)
+    {
+        exit(EXIT_FAILURE);
+    }
 }
 
 int main(int argc, char **argv)
@@ -37,7 +40,10 @@ int main(int argc, char **argv)
         exit(EXIT_FAILURE);
     } 
     
-    sniffer_cleanup(&sniffer);
+    if (sniffer_cleanup(&sniffer) == -1)
+    {
+        exit(EXIT_FAILURE);
+    }
 
     return EXIT_SUCCESS;
 }

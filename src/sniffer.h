@@ -17,5 +17,5 @@ typedef struct sniffer {
 int sniffer_init(sniffer_t *sniffer, char *interface, bool promiscuous_mode);
 int sniffer_run(sniffer_t *sniffer);
 int sniffer_cleanup(sniffer_t *sniffer);
-void sniffer_stop(sniffer_t *sniffer);
+int sniffer_stop(sniffer_t *sniffer);
 #endif
