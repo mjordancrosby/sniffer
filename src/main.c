@@ -18,7 +18,7 @@ int main(int argc, char **argv)
     if (argc < 2)
     {
         printf("Usage: sniffer <interface>\n");
-        exit(0);
+        exit(EXIT_FAILURE);
     }
 
     printf("Using interface %s\n", argv[1]);
@@ -29,13 +29,15 @@ int main(int argc, char **argv)
 
     if (sniffer_init(&sniffer, argv[1], false) == -1)
     {
-        exit(1);
+        exit(EXIT_FAILURE);
     }
    
     if (sniffer_run(&sniffer) == -1)
     {
-        exit(1);
+        exit(EXIT_FAILURE);
     } 
     
     sniffer_cleanup(&sniffer);
+
+    return EXIT_SUCCESS;
 }
