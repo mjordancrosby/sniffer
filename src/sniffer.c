@@ -2,6 +2,14 @@
 
 #include <arpa/inet.h>
 #include <errno.h>
+#include <net/ethernet.h>
+#include <net/if.h>
+#include <net/if_packet.h>
+#include <netinet/in.h>
+#include <netinet/ip.h>
+#include <netinet/tcp.h>
+#include <netinet/udp.h>
+#include <netpacket/packet.h>
 #include <search.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,14 +17,6 @@
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/timerfd.h>
-#include <net/if.h>
-#include <net/if_packet.h>
-#include <net/ethernet.h>
-#include <netinet/in.h>
-#include <netinet/ip.h>
-#include <netinet/tcp.h>
-#include <netinet/udp.h>
-#include <netpacket/packet.h>
 #include <unistd.h>
 
 typedef struct node {
