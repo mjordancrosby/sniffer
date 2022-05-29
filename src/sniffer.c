@@ -137,15 +137,16 @@ int sniffer_read_packet(sniffer_t *sniffer)
         return 0;
     }
 
-    if (recv < sizeof(struct ether_header) + sizeof(struct ip))
+    ssize_t expected_size = sizeof(struct ether_header) + sizeof(struct ip);
+    if (recv < expected_size)
     {
-        fprintf(stderr, "Did not receive a complete ipv4 header\n");
+        fprintf(stderr, "Did not receive a complete ipv4 header. %lu-%lu bytes received\n", recv, expected_size);
         return -1;
     }
 
-    
     struct ip *iphdr = (struct ip *) (buffer + sizeof(struct ether_header));
 
+    //Only process first fragment. Subsequent fragments of TCP/UDP packets will not contain headers 
     if ((ntohs(iphdr->ip_off) & IP_OFFMASK) != 0)
     {
         return 0;
@@ -160,10 +161,10 @@ int sniffer_read_packet(sniffer_t *sniffer)
     char flow[64];
     if (iphdr->ip_p == IPPROTO_TCP)
     {
-        ssize_t expected = sizeof(struct ether_header) + (iphdr->ip_hl * 4) + sizeof(struct tcphdr);
-        if (recv < expected)
+        expected_size = sizeof(struct ether_header) + (iphdr->ip_hl * 4) + sizeof(struct tcphdr);
+        if (recv < expected_size)
         {
-            fprintf(stderr, "Did not receive a complete tcp header\n");
+            fprintf(stderr, "Did not receive a complete tcp header. %lu-%lu bytes received\n", recv, expected_size);
             return -1;
         }       
         
@@ -172,10 +173,10 @@ int sniffer_read_packet(sniffer_t *sniffer)
     }
     else if (iphdr->ip_p == IPPROTO_UDP)
     {
-        ssize_t expected = sizeof(struct ether_header) + (iphdr->ip_hl * 4) + sizeof(struct udphdr);
-        if (recv < expected)
+        expected_size = sizeof(struct ether_header) + (iphdr->ip_hl * 4) + sizeof(struct udphdr);
+        if (recv < expected_size)
         {
-            fprintf(stderr, "Did not receive a complete udp header\n");
+            fprintf(stderr, "Did not receive a complete udp header\n. %lu-%lu bytes received\n", recv, expected_size);
             return -1;
         }       
         struct udphdr *udphdr = (struct udphdr *) (buffer + sizeof(struct ethhdr) + (iphdr->ip_hl * 4));
