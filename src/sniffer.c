@@ -2,10 +2,6 @@
 
 #include <arpa/inet.h>
 #include <errno.h>
-#include <linux/if_packet.h>
-#include <linux/if.h>
-#include <linux/tcp.h>
-#include <linux/udp.h>
 #include <search.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,13 +9,15 @@
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/timerfd.h>
+#include <net/if.h>
+#include <net/if_packet.h>
 #include <net/ethernet.h>
 #include <netinet/in.h>
 #include <netinet/ip.h>
+#include <netinet/tcp.h>
+#include <netinet/udp.h>
+#include <netpacket/packet.h>
 #include <unistd.h>
-
-#define IP_MF 0x2000 
-#define IP_OFFSET 0x1FFF
 
 typedef struct node {
     ENTRY* value;
@@ -147,8 +145,8 @@ int sniffer_read_packet(sniffer_t *sniffer)
     }
 
     
-    //ignore remaing ip fragments 
-    if ((iphdr->frag_off & IP_MF) == IP_MF && (iphdr->frag_off & IP_OFFSET) != 0x0000)
+    //only count first ip fragment to avoid parsing TCP/UDP headers in subsequent fragments
+    if ((iphdr->frag_off & IP_OFFMASK) != 0x0000)
     {
         return 0;
     }
