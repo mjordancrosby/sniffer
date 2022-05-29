@@ -1,3 +1,6 @@
+#ifndef SNIFFER_H
+#define SNIFFER_H
+
 #include <stdbool.h>
 #include <sys/epoll.h>
 
@@ -15,3 +18,4 @@ int sniffer_init(sniffer_t *sniffer, char *interface, bool promiscuous_mode);
 int sniffer_run(sniffer_t *sniffer);
 int sniffer_cleanup(sniffer_t *sniffer);
 void sniffer_stop(sniffer_t *sniffer);
+#endif
