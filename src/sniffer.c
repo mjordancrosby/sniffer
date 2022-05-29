@@ -138,7 +138,7 @@ int sniffer_read_packet(sniffer_t *sniffer)
             return -1;
         }
         return 0;
-    } 
+    }
 
     if (recv < 38)
     {
@@ -146,6 +146,7 @@ int sniffer_read_packet(sniffer_t *sniffer)
         return -1;
     }
 
+    
     //ignore remaing ip fragments 
     if ((iphdr->frag_off & IP_MF) == IP_MF && (iphdr->frag_off & IP_OFFSET) != 0x0000)
     {
@@ -155,11 +156,11 @@ int sniffer_read_packet(sniffer_t *sniffer)
     struct sockaddr_in src, dest;
     
     src.sin_addr.s_addr = iphdr->saddr;
-    char src_ip[13];
+    char src_ip[18];
     strcpy(src_ip, inet_ntoa(src.sin_addr));
 
     dest.sin_addr.s_addr = iphdr->daddr;
-    char dest_ip[13];
+    char dest_ip[18];
     strcpy(dest_ip, inet_ntoa(dest.sin_addr));
 
     char flow[64];
