@@ -120,12 +120,11 @@ int sniffer_init(sniffer_t *sniffer, char *interface, bool promiscuous_mode)
 
 int sniffer_read_packet(sniffer_t *sniffer)
 {
-    //only need to read the header
-    char buffer[2048];
+    char buffer[ETHERMTU];
 
     struct sockaddr_ll src_saddr;
     socklen_t src_saddr_len = sizeof(src_saddr);
-    ssize_t recv = recvfrom(sniffer->sockfd, &buffer, 2048, 0, (struct sockaddr *)&src_saddr, &src_saddr_len);
+    ssize_t recv = recvfrom(sniffer->sockfd, &buffer, ETHERMTU, 0, (struct sockaddr *)&src_saddr, &src_saddr_len);
 
     if (recv == -1)
     {
