@@ -122,7 +122,6 @@ int sniffer_read_packet(sniffer_t *sniffer)
 {
     //only need to read the header
     char buffer[2048];
-    struct iphdr *iphdr = (struct iphdr *) (buffer + sizeof(struct ethhdr));
 
     struct sockaddr_ll src_saddr;
     socklen_t src_saddr_len = sizeof(src_saddr);
@@ -138,43 +137,53 @@ int sniffer_read_packet(sniffer_t *sniffer)
         return 0;
     }
 
-    if (recv < 38)
+    if (recv < sizeof(struct ether_header) + sizeof(struct ip))
     {
         fprintf(stderr, "Did not receive a complete ipv4 header\n");
         return -1;
     }
 
     
-    //only count first ip fragment to avoid parsing TCP/UDP headers in subsequent fragments
-    if ((iphdr->frag_off & IP_OFFMASK) != 0x0000)
+    struct ip *iphdr = (struct ip *) (buffer + sizeof(struct ether_header));
+
+    if ((ntohs(iphdr->ip_off) & IP_OFFMASK) != 0)
     {
         return 0;
     }
 
-    struct sockaddr_in src, dest;
-    
-    src.sin_addr.s_addr = iphdr->saddr;
     char src_ip[18];
-    strcpy(src_ip, inet_ntoa(src.sin_addr));
+    strcpy(src_ip, inet_ntoa(iphdr->ip_src));
 
-    dest.sin_addr.s_addr = iphdr->daddr;
-    char dest_ip[18];
-    strcpy(dest_ip, inet_ntoa(dest.sin_addr));
+    char dst_ip[18];
+    strcpy(dst_ip, inet_ntoa(iphdr->ip_dst));
 
     char flow[64];
-    if (iphdr->protocol == IPPROTO_TCP)
+    if (iphdr->ip_p == IPPROTO_TCP)
     {
-        struct tcphdr *tcphdr = (struct tcphdr *) (buffer + sizeof(struct ethhdr) + sizeof(struct iphdr));
-        sprintf(flow, "%s:%u => %s:%u %d", src_ip, ntohs(tcphdr->source), dest_ip, ntohs(tcphdr->dest), (unsigned int)iphdr->protocol);
+        ssize_t expected = sizeof(struct ether_header) + (iphdr->ip_hl * 4) + sizeof(struct tcphdr);
+        if (recv < expected)
+        {
+            fprintf(stderr, "Did not receive a complete tcp header\n");
+            return -1;
+        }       
+        
+        struct tcphdr *tcphdr = (struct tcphdr *) (buffer + sizeof(struct ether_header) + (iphdr->ip_hl * 4));
+        sprintf(flow, "%s:%u => %s:%u %u", src_ip, ntohs(tcphdr->source), dst_ip, ntohs(tcphdr->dest), iphdr->ip_p);
     }
-    else if (iphdr->protocol == IPPROTO_UDP)
+    else if (iphdr->ip_p == IPPROTO_UDP)
     {
-        struct udphdr *udphdr = (struct udphdr *) (buffer + sizeof(struct ethhdr) + sizeof(struct iphdr));
-        sprintf(flow, "%s:%d => %s:%d %d", src_ip, ntohs(udphdr->source), dest_ip, ntohs(udphdr->dest), (unsigned int)iphdr->protocol);
+        ssize_t expected = sizeof(struct ether_header) + (iphdr->ip_hl * 4) + sizeof(struct udphdr);
+        if (recv < expected)
+        {
+            fprintf(stderr, "Did not receive a complete udp header\n");
+            return -1;
+        }       
+        struct udphdr *udphdr = (struct udphdr *) (buffer + sizeof(struct ethhdr) + (iphdr->ip_hl * 4));
+        sprintf(flow, "%s:%d => %s:%d %u", src_ip, ntohs(udphdr->source), dst_ip, ntohs(udphdr->dest), iphdr->ip_p);
     }
     else
     {
-        sprintf(flow, "%s => %s %d", src_ip, dest_ip, (unsigned int)iphdr->protocol);
+        sprintf(flow, "%s => %s %u", src_ip, dst_ip, iphdr->ip_p);
     }
 
     ENTRY item;
