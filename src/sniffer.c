@@ -120,6 +120,7 @@ int sniffer_init(sniffer_t *sniffer, char *interface, bool promiscuous_mode)
 
 int sniffer_read_packet(sniffer_t *sniffer)
 {
+    //Assuming the interface is using a standard mtu of 1500
     char buffer[ETHERMTU];
 
     struct sockaddr_ll src_saddr;
@@ -160,25 +161,25 @@ int sniffer_read_packet(sniffer_t *sniffer)
     char flow[64];
     if (iphdr->ip_p == IPPROTO_TCP)
     {
-        expected_size = sizeof(struct ether_header) + (iphdr->ip_hl * 4) + sizeof(struct tcphdr);
+        expected_size = sizeof(struct ether_header) + (iphdr->ip_hl * sizeof(uint32_t)) + sizeof(struct tcphdr);
         if (recv < expected_size)
         {
             fprintf(stderr, "Did not receive a complete tcp header. %lu-%lu bytes received\n", recv, expected_size);
             return -1;
         }       
         
-        struct tcphdr *tcphdr = (struct tcphdr *) (buffer + sizeof(struct ether_header) + (iphdr->ip_hl * 4));
+        struct tcphdr *tcphdr = (struct tcphdr *) (buffer + sizeof(struct ether_header) + (iphdr->ip_hl * sizeof(uint32_t)));
         sprintf(flow, "%s:%u => %s:%u %u", src_ip, ntohs(tcphdr->source), dst_ip, ntohs(tcphdr->dest), iphdr->ip_p);
     }
     else if (iphdr->ip_p == IPPROTO_UDP)
     {
-        expected_size = sizeof(struct ether_header) + (iphdr->ip_hl * 4) + sizeof(struct udphdr);
+        expected_size = sizeof(struct ether_header) + (iphdr->ip_hl * sizeof(uint32_t)) + sizeof(struct udphdr);
         if (recv < expected_size)
         {
             fprintf(stderr, "Did not receive a complete udp header\n. %lu-%lu bytes received\n", recv, expected_size);
             return -1;
         }       
-        struct udphdr *udphdr = (struct udphdr *) (buffer + sizeof(struct ethhdr) + (iphdr->ip_hl * 4));
+        struct udphdr *udphdr = (struct udphdr *) (buffer + sizeof(struct ethhdr) + (iphdr->ip_hl * sizeof(uint32_t)));
         sprintf(flow, "%s:%d => %s:%d %u", src_ip, ntohs(udphdr->source), dst_ip, ntohs(udphdr->dest), iphdr->ip_p);
     }
     else
