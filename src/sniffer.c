@@ -114,7 +114,7 @@ int sniffer_init(sniffer_t *self, char *interface, bool promiscuous_mode)
     if (self->timerfd == -1)
     {
         fprintf(stderr, "Failed to create timer - %s\n", strerror(errno));
-        close(self->socketfd);
+        sniffer_cleanup(self);
         return -1;
     }
     
