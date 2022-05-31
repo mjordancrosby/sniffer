@@ -23,36 +23,6 @@
 
 #define MAX_EVENTS 8
 
-#define default_events(self, type)\
-do {\
-self->type##fd = -1;\
-self->type##_event.data.fd = -1;\
-} while(0)
-
-#define register_events(self, type)\
-do {\
-self->type##_event.events = EPOLLIN;\
-self->type##_event.data.fd = self->type##fd;\
-if (epoll_ctl(self->epollfd, EPOLL_CTL_ADD, self->type##fd, &self->type##_event) == -1) \
-{\
-    fprintf(stderr, "Find to register ##type event - %s\n", strerror(errno));\
-    sniffer_cleanup(self);\
-    return -1;\
-}\
-} while(0)
-
-#define closefd(self, type)\
-do {\
-if (self->type##fd > -1)\
-{\
-    if (close(self->type##fd) == -1)\
-    {\
-        fprintf(stderr, "Failed to close type## fd - %s\n", strerror(errno));\
-        return -1;\
-    }\
-}\
-} while(0)
-
 typedef struct node {
     ENTRY* value;
     struct node *next;
@@ -62,15 +32,23 @@ int sniffer_init(sniffer_t *self, char *interface, bool promiscuous_mode)
 {
     self->running = false;
     self->flows = NULL;
-    default_events(self, socket);
-    default_events(self, timer);
-    default_events(self, signal);
+    self->epollfd = -1;
+    self->timerfd = -1;
+    self->signalfd = -1;
+    self->socketfd = -1;
+
+    if (hcreate(20000) == 0)
+    {
+        fprintf(stderr, "Failed to create hashtable - %s\n", strerror(errno));
+        return -1;
+    }
 
     self->epollfd = epoll_create1(0);
 
     if (self->epollfd == -1)
     {
         fprintf(stderr, "Failed create epoll - %s\n", strerror(errno));
+        sniffer_cleanup(self);
         return -1;
     }
 
@@ -121,7 +99,6 @@ int sniffer_init(sniffer_t *self, char *interface, bool promiscuous_mode)
     sigset_t mask;
     sigemptyset(&mask);
     sigaddset(&mask, SIGINT);
-
     if (sigprocmask(SIG_BLOCK, &mask, NULL) == -1)
     {
         fprintf(stderr, "Cannot set signal block - %s\n", strerror(errno));
@@ -137,16 +114,32 @@ int sniffer_init(sniffer_t *self, char *interface, bool promiscuous_mode)
         return -1;
     }
 
-    if (hcreate(20000) == 0)
+    self->socket_event.events = EPOLLIN;
+    self->socket_event.data.fd = self->socketfd;
+    if (epoll_ctl(self->epollfd, EPOLL_CTL_ADD, self->socketfd, &self->socket_event) == -1)
     {
-        fprintf(stderr, "Find to create hashtable - %s\n", strerror(errno));
+        fprintf(stderr, "Failed to register for socket events - %s\n", strerror(errno));
         sniffer_cleanup(self);
         return -1;
     }
 
-    register_events(self, socket);
-    register_events(self, timer);
-    register_events(self, signal);
+    self->signal_event.events = EPOLLIN;
+    self->signal_event.data.fd = self->signalfd;
+    if (epoll_ctl(self->epollfd, EPOLL_CTL_ADD, self->signalfd, &self->signal_event) == -1)
+    {
+        fprintf(stderr, "Failed to register for signal events - %s\n", strerror(errno));
+        sniffer_cleanup(self);
+        return -1;
+    }
+
+    self->timer_event.events = EPOLLIN;
+    self->timer_event.data.fd = self->timerfd;
+    if (epoll_ctl(self->epollfd, EPOLL_CTL_ADD, self->timerfd, &self->timer_event) == -1)
+    {
+        fprintf(stderr, "Failed to register for timer events - %s\n", strerror(errno));
+        sniffer_cleanup(self);
+        return -1;
+    }
 
     return 0;
 }
@@ -369,10 +362,42 @@ int sniffer_run(sniffer_t *self)
 
 int sniffer_cleanup(sniffer_t *self)
 {
-    closefd(self, epoll);
-    closefd(self, timer);
-    closefd(self, socket);
-    closefd(self, signal);
+    
+    if (self->epollfd > -1)
+    {
+        if (close(self->epollfd) == -1)
+        {
+            fprintf(stderr, "Failed to close epoll - %s\n", strerror(errno));
+            return -1;
+        }
+    }
+
+    if (self->socketfd > -1)
+    {
+        if (close(self->socketfd) == -1)
+        {
+            fprintf(stderr, "Failed to close socket - %s\n", strerror(errno));
+            return -1;
+        }
+    }
+
+    if (self->signalfd > -1)
+    {
+        if (close(self->signalfd) == -1)
+        {
+            fprintf(stderr, "Failed to close signal - %s\n", strerror(errno));
+            return -1;
+        }
+    }
+
+    if (self->timerfd > -1)
+    {
+        if (close(self->timerfd) == -1)
+        {
+            fprintf(stderr, "Failed to close timer - %s\n", strerror(errno));
+            return -1;
+        }
+    }
 
     node_t *node;
     node = (node_t *)self->flows;
