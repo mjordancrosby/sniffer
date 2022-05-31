@@ -1,18 +1,9 @@
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 
 #include "sniffer.h"
 
 sniffer_t sniffer;
-
-void init_handler(int)
-{
-    if (sniffer_stop(&sniffer) == -1)
-    {
-        exit(EXIT_FAILURE);
-    }
-}
 
 int main(int argc, char **argv)
 {
@@ -23,10 +14,6 @@ int main(int argc, char **argv)
     }
 
     printf("Using interface %s\n", argv[1]);
-    
-    struct sigaction act;
-    act.sa_handler = init_handler;
-    sigaction(SIGINT, &act, NULL);
 
     if (sniffer_init(&sniffer, argv[1], false) == -1)
     {

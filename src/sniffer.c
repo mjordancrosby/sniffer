@@ -11,35 +11,82 @@
 #include <netinet/udp.h>
 #include <netpacket/packet.h>
 #include <search.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/signalfd.h>
 #include <sys/socket.h>
 #include <sys/timerfd.h>
 #include <unistd.h>
+
+#define MAX_EVENTS 8
+
+#define default_events(self, type)\
+do {\
+self->type##fd = -1;\
+self->type##_event.data.fd = -1;\
+} while(0)
+
+#define register_events(self, type)\
+do {\
+self->type##_event.events = EPOLLIN;\
+self->type##_event.data.fd = self->type##fd;\
+if (epoll_ctl(self->epollfd, EPOLL_CTL_ADD, self->type##fd, &self->type##_event) == -1) \
+{\
+    fprintf(stderr, "Find to register ##type event - %s\n", strerror(errno));\
+    sniffer_cleanup(self);\
+    return -1;\
+}\
+} while(0)
+
+#define closefd(self, type)\
+do {\
+if (self->type##fd > -1)\
+{\
+    if (close(self->type##fd) == -1)\
+    {\
+        fprintf(stderr, "Failed to close type## fd - %s\n", strerror(errno));\
+        return -1;\
+    }\
+}\
+} while(0)
 
 typedef struct node {
     ENTRY* value;
     struct node *next;
 } node_t;
 
-int sniffer_init(sniffer_t *sniffer, char *interface, bool promiscuous_mode)
+int sniffer_init(sniffer_t *self, char *interface, bool promiscuous_mode)
 {
-    sniffer->running = false;
+    self->running = false;
+    self->flows = NULL;
+    default_events(self, socket);
+    default_events(self, timer);
+    default_events(self, signal);
 
-    sniffer->sockfd = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_IP));
+    self->epollfd = epoll_create1(0);
 
-    if (sniffer->sockfd == -1)
+    if (self->epollfd == -1)
     {
-        fprintf(stderr, "Failed to create socket - %s\n", strerror(errno));
+        fprintf(stderr, "Failed create epoll - %s\n", strerror(errno));
         return -1;
     }
 
-    if (setsockopt(sniffer->sockfd, SOL_SOCKET, SO_BINDTODEVICE, interface, strlen(interface)) == -1)
+    self->socketfd = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_IP));
+
+    if (self->socketfd == -1)
+    {
+        fprintf(stderr, "Failed to create socket - %s\n", strerror(errno));
+        sniffer_cleanup(self);
+        return -1;
+    }
+
+    if (setsockopt(self->socketfd, SOL_SOCKET, SO_BINDTODEVICE, interface, strlen(interface)) == -1)
     {
         fprintf(stderr, "Failed to bind to interface %s - %s\n", interface, strerror(errno));
-        close(sniffer->sockfd);
+        sniffer_cleanup(self);
         return -1;
     }
 
@@ -47,94 +94,76 @@ int sniffer_init(sniffer_t *sniffer, char *interface, bool promiscuous_mode)
     {
         struct ifreq ifreq;
         strcpy (ifreq.ifr_name, interface);
-        if (ioctl(sniffer->sockfd, SIOCGIFFLAGS, &ifreq) == -1)
+        if (ioctl(self->socketfd, SIOCGIFFLAGS, &ifreq) == -1)
         {
             fprintf(stderr, "Failed to get IF flags %s - %s\n", interface, strerror(errno));
-            close(sniffer->sockfd);
+            sniffer_cleanup(self);
             return -1;
         }
         
         ifreq.ifr_flags |= IFF_PROMISC;
-        if (ioctl(sniffer->sockfd, SIOCSIFFLAGS, &ifreq) == -1)
+        if (ioctl(self->socketfd, SIOCSIFFLAGS, &ifreq) == -1)
         {
             fprintf(stderr, "Failed to set permisoucs mode %s - %s\n", interface, strerror(errno));
-            close(sniffer->sockfd);
+            sniffer_cleanup(self);
             return -1;
         }
     }
 
-    sniffer->timerfd = timerfd_create(CLOCK_MONOTONIC, 0);
-    if (sniffer->timerfd == -1)
+    self->timerfd = timerfd_create(CLOCK_MONOTONIC, 0);
+    if (self->timerfd == -1)
     {
         fprintf(stderr, "Failed to create timer - %s\n", strerror(errno));
-        close(sniffer->sockfd);
+        close(self->socketfd);
         return -1;
     }
-
-    sniffer->epollfd = epoll_create1(0);
-
-    if (sniffer->epollfd == -1)
-    {
-        fprintf(stderr, "Failed create epoll - %s\n", strerror(errno));
-        close(sniffer->sockfd);
-        close(sniffer->timerfd);
-        return -1;
-    }
-
-    sniffer->timer_event.events = EPOLLIN;
-    sniffer->timer_event.data.fd = sniffer->timerfd;
     
-    if (epoll_ctl(sniffer->epollfd, EPOLL_CTL_ADD, sniffer->timerfd, &sniffer->timer_event) == -1)
+    sigset_t mask;
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGINT);
+
+    if (sigprocmask(SIG_BLOCK, &mask, NULL) == -1)
     {
-        fprintf(stderr, "Find to register timer event - %s\n", strerror(errno));
-        close(sniffer->sockfd);
-        close(sniffer->timerfd);
-        close(sniffer->epollfd);
+        fprintf(stderr, "Cannot set signal block - %s\n", strerror(errno));
+        sniffer_cleanup(self);
         return -1;
     }
 
-    sniffer->socket_event.events = EPOLLIN;
-    sniffer->socket_event.data.fd = sniffer->sockfd;
-
-    if (epoll_ctl(sniffer->epollfd, EPOLL_CTL_ADD, sniffer->sockfd, &sniffer->socket_event) == -1)
+    self->signalfd = signalfd(-1, &mask, 0);
+    if (self->timerfd == -1)
     {
-        fprintf(stderr, "Find to register socket event - %s\n", strerror(errno));
-        close(sniffer->sockfd);
-        close(sniffer->timerfd);
-        close(sniffer->epollfd);
+        fprintf(stderr, "Failed to create timer - %s\n", strerror(errno));
+        sniffer_cleanup(self);
         return -1;
     }
 
     if (hcreate(20000) == 0)
     {
         fprintf(stderr, "Find to create hashtable - %s\n", strerror(errno));
-        close(sniffer->sockfd);
-        close(sniffer->timerfd);
-        close(sniffer->epollfd);
+        sniffer_cleanup(self);
         return -1;
     }
 
-    sniffer->flows = NULL;
+    register_events(self, socket);
+    register_events(self, timer);
+    register_events(self, signal);
+
     return 0;
 }
 
-int sniffer_read_packet(sniffer_t *sniffer)
+int sniffer_read_packet(sniffer_t *self)
 {
     //Assuming the interface is using a standard mtu of 1500
     char buffer[ETHERMTU];
 
     struct sockaddr_ll src_saddr;
     socklen_t src_saddr_len = sizeof(src_saddr);
-    ssize_t recv = recvfrom(sniffer->sockfd, &buffer, ETHERMTU, 0, (struct sockaddr *)&src_saddr, &src_saddr_len);
+    ssize_t recv = recvfrom(self->socketfd, &buffer, ETHERMTU, 0, (struct sockaddr *)&src_saddr, &src_saddr_len);
 
     if (recv == -1)
     {
-        if (errno != EINTR)
-        {
-            fprintf(stderr, "recvfrom failed - %s\n", strerror(errno));
-            return -1;
-        }
-        return 0;
+        fprintf(stderr, "recvfrom failed - %s\n", strerror(errno));
+        return -1;
     }
 
     ssize_t expected_size = sizeof(struct ether_header) + sizeof(struct ip);
@@ -219,25 +248,21 @@ int sniffer_read_packet(sniffer_t *sniffer)
         node_t *next = malloc(sizeof(node_t));
 
         next->value = result;
-        next->next = (node_t *)sniffer->flows;
+        next->next = (node_t *)self->flows;
 
-        sniffer->flows = next;
+        self->flows = next;
     }
 
     return 0;
 }
 
-int sniffer_print(sniffer_t *sniffer)
+int sniffer_print(sniffer_t *self)
 {
     uint64_t expirations;
-    if (read(sniffer->timerfd, &expirations, sizeof(expirations)) == -1)
+    if (read(self->timerfd, &expirations, sizeof(expirations)) == -1)
     {
-        if (errno != EINTR)
-        {
-            fprintf(stderr, "Failed to read timer - %s\n", strerror(errno));
-            return -1;
-        }
-        return 0;
+        fprintf(stderr, "Failed to read timer - %s\n", strerror(errno));
+        return -1;
     }
 
     if (expirations == 0l)
@@ -248,7 +273,7 @@ int sniffer_print(sniffer_t *sniffer)
 
     printf("Printing flows\n");
     node_t *node;
-    for(node = (node_t *)sniffer->flows; node != NULL; node = node->next)
+    for(node = (node_t *)self->flows; node != NULL; node = node->next)
     {
         unsigned int *count = (unsigned int *)node->value->data;
         printf("%s = %u\n", node->value->key, *count);
@@ -257,9 +282,27 @@ int sniffer_print(sniffer_t *sniffer)
     return 0;
 }
 
-int sniffer_run(sniffer_t *sniffer)
+int sniffer_stop(sniffer_t *self)
 {
-    sniffer->running = true;
+    struct itimerspec ts;
+    ts.it_interval.tv_sec = 0;
+    ts.it_interval.tv_nsec = 0;
+    ts.it_value.tv_sec = 0;
+    ts.it_value.tv_nsec = 0;
+
+    if (timerfd_settime(self->timerfd, 0, &ts, NULL) == -1)
+    {
+        fprintf(stderr, "Failed to disable timer - %s\n", strerror(errno));
+        return -1;
+    }
+
+    self->running = false;
+    return 0;
+}
+
+int sniffer_run(sniffer_t *self)
+{
+    self->running = true;
     
     struct itimerspec ts;
     ts.it_interval.tv_sec = 10;
@@ -267,25 +310,21 @@ int sniffer_run(sniffer_t *sniffer)
     ts.it_value.tv_sec = 10;
     ts.it_value.tv_nsec = 0;
 
-    if (timerfd_settime(sniffer->timerfd, 0, &ts, NULL) == -1)
+    if (timerfd_settime(self->timerfd, 0, &ts, NULL) == -1)
     {
         fprintf(stderr, "Failed to set timer - %s\n", strerror(errno));
         return -1;
     }
     
-    while (sniffer->running)
+    while (self->running)
     {
-        struct epoll_event event;
+        struct epoll_event events[MAX_EVENTS];
         
         int n;
-        if ((n = epoll_wait(sniffer->epollfd, &event, 1, -1)) == -1)
+        if ((n = epoll_wait(self->epollfd, events, MAX_EVENTS, -1)) == -1)
         {
-            if (errno != EINTR)
-            {
-                fprintf(stderr, "epoll_wait failed - %s\n", strerror(errno));
-                return -1;
-            }
-            return 0;
+            fprintf(stderr, "epoll_wait failed - %s\n", strerror(errno));
+            return -1;
         }
 
         if (n < 1)
@@ -293,34 +332,50 @@ int sniffer_run(sniffer_t *sniffer)
             fprintf(stderr, "Did not receive any events\n");
             return -1;
         }
-        
-        if (event.data.fd == sniffer->sockfd)
+
+        int i;
+        for (i = 0; i < n; i++)
         {
-            if (sniffer_read_packet(sniffer) == -1)
+            if (events[i].data.fd == self->socketfd)
             {
+                if (sniffer_read_packet(self) == -1)
+                {
+                    return -1;
+                }
+            }
+            else if (events[i].data.fd == self->timerfd)
+            {
+                if (sniffer_print(self) == -1)
+                {
+                    return -1;
+                }
+            }
+            else if (events[i].data.fd == self->signalfd)
+            {       
+                if (sniffer_stop(self) == -1)
+                {
+                    return -1;
+                }
+            }
+            else
+            {
+                fprintf(stderr, "Unkown event received.\n");
                 return -1;
             }
-        }
-        else if (event.data.fd == sniffer->timerfd)
-        {
-            if (sniffer_print(sniffer) == -1)
-            {
-                return -1;
-            }
-        }
-        else
-        {
-            fprintf(stderr, "Unkown event received.\n");
-            return -1;
         }
     } 
     return 0;
 }
 
-int sniffer_cleanup(sniffer_t *sniffer)
+int sniffer_cleanup(sniffer_t *self)
 {
+    closefd(self, epoll);
+    closefd(self, timer);
+    closefd(self, socket);
+    closefd(self, signal);
+
     node_t *node;
-    node = (node_t *)sniffer->flows;
+    node = (node_t *)self->flows;
     while(node)
     {
         free(node->value->data);
@@ -332,53 +387,5 @@ int sniffer_cleanup(sniffer_t *sniffer)
 
     hdestroy();
     
-    if (epoll_ctl(sniffer->epollfd, EPOLL_CTL_DEL, sniffer->timerfd, &sniffer->timer_event) < 0)
-    {
-        fprintf(stderr, "Failed to deregister timer event - %s\n", strerror(errno));
-        return -1;
-    }
-
-    if (epoll_ctl(sniffer->epollfd, EPOLL_CTL_DEL, sniffer->sockfd, &sniffer->socket_event) < 0)
-    {
-        fprintf(stderr, "Failed to deregister socket event - %s\n", strerror(errno));
-        return -1;
-    }
-
-    if (close(sniffer->epollfd) == -1)
-    {
-        fprintf(stderr, "Failed to close epoll fd - %s\n", strerror(errno));
-        return -1;
-    }
-
-    if (close(sniffer->timerfd) == -1)
-    {
-        fprintf(stderr, "Failed to close timer - %s\n", strerror(errno));
-        return -1;
-    }
-    
-    if (close(sniffer->sockfd) == -1)
-    {
-        fprintf(stderr, "Failed to close scoket - %s\n", strerror(errno));
-        return -1;
-    }
-
-    return 0;
-}
-
-int sniffer_stop(sniffer_t *sniffer)
-{
-    struct itimerspec ts;
-    ts.it_interval.tv_sec = 0;
-    ts.it_interval.tv_nsec = 0;
-    ts.it_value.tv_sec = 0;
-    ts.it_value.tv_nsec = 0;
-
-    if (timerfd_settime(sniffer->timerfd, 0, &ts, NULL) == -1)
-    {
-        fprintf(stderr, "Failed to disable timer - %s\n", strerror(errno));
-        return -1;
-    }
-
-    sniffer->running = false;
     return 0;
 }
